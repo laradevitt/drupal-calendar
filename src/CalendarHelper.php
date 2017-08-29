@@ -670,11 +670,9 @@ class CalendarHelper extends DateHelper {
 //    }
     $all_fields = [];
     foreach ($fields as $key => $field) {
-      if ($base == substr($key, 0, 4)) {
-        if (isset($fields[$key][$type])) {
-//          uasort($fields[$key][$type], '_views_sort_types');
-          $all_fields = array_merge($all_fields, $fields[$key][$type]);
-        }
+      if (isset($fields[$key][$type])) {
+//      uasort($fields[$key][$type], '_views_sort_types');
+        $all_fields = array_merge($all_fields, $fields[$key][$type]);
       }
     }
     return $all_fields;
