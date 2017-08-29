@@ -365,12 +365,11 @@ class Calendar extends RowPluginBase {
         $fieldName = $handler->realField;
         if (!empty($data['alias'][$handler->table . '_' . $fieldName])) {
           $date_fields[$fieldName] = $data['alias'][$handler->table . '_' . $fieldName];
-          $this->dateFields = $date_fields;
         }
         $this->dateArgument = $handler;
-
       }
     }
+    $this->dateFields = $date_fields;
 //
 //    // Get the language for this view.
 //    $this->language = $this->display->handler->get_option('field_language');
@@ -391,12 +390,15 @@ class Calendar extends RowPluginBase {
     if (!is_numeric($id)) {
       return [];
     }
+    $rows = [];
+    $user_tz = $dateInfo->getTimezone();  // Maybe use this instead:  timezone_open(drupal_get_user_timezone());
+    $db_tz = timezone_open('UTC');
 
     // There could be more than one date field in a view so iterate through all
     // of them to find the right values for this view result.
     foreach ($this->dateFields as $field_name => $info) {
 
-      // Clone this entity so we can change it's values without altering other
+      // Clone this entity so we can change its values without altering other
       // occurrences of this entity on the same page, for example in an
       // "Upcoming" block.
       /** @var \Drupal\Core\Entity\ContentEntityBase $entity */
@@ -406,14 +408,6 @@ class Calendar extends RowPluginBase {
         return [];
       }
 
-      // @todo clean up
-//      $table_name  = $info['table_name'];
-      $delta_field = $info['delta_field'];
-//      $tz_handling = $info['tz_handling'];
-//      $tz_field    = $info['timezone_field'];
-//      $rrule_field = $info['rrule_field'];
-//      $is_field    = $info['is_field'];
-
       $event = new CalendarEvent($entity);
 
       // Retrieve the field value(s) that matched our query from the cached node.
@@ -421,86 +415,41 @@ class Calendar extends RowPluginBase {
       $entity->date_id = [];
       $item_start_date = NULL;
       $item_end_date   = NULL;
-      $granularity = 'second';
-      $increment = 1;
 
-      // @todo implement timezone support
       if ($info['is_field']) {
-        // Should CalendarHelper::dateViewFields() be returning this already?
-        $entity_field_name = str_replace('_value', '', $field_name);
-        $datetime_type = $entity->getFieldDefinition($entity_field_name)->getSetting('datetime_type');
-        $storage_format = $datetime_type == 'date' ? DATETIME_DATE_STORAGE_FORMAT : DATETIME_DATETIME_STORAGE_FORMAT;
-//        $db_tz   = date_get_timezone_db($tz_handling, isset($item->$tz_field) ? $item->$tz_field : timezone_name_get($dateInfo->getTimezone()));
-//        $to_zone = date_get_timezone($tz_handling, isset($item->$tz_field)) ? $item->$tz_field : timezone_name_get($dateInfo->getTimezone());
-
-        $item_start_date = \DateTime::createFromFormat($storage_format, $row->{$info['query_name']});
-        $item_end_date = \DateTime::createFromFormat($storage_format, $row->{$info['query_name']});
-
-        // @todo don't hardcode
-//        $granularity = date_granularity_precision($cck_field['settings']['granularity']);
-        $granularity = 'week';
-//        $increment = $instance['widget']['settings']['increment'];
-      }
-      elseif ($entity->get($field_name)) {
-        $item = $entity->get($field_name)->getValue();
-        // @todo handle timezones
-//        $db_tz   = date_get_timezone_db($tz_handling, isset($item->$tz_field) ? $item->$tz_field : timezone_name_get($dateInfo->getTimezone()));
-//        $to_zone = date_get_timezone($tz_handling, isset($item->$tz_field) ? $item->$tz_field : timezone_name_get($dateInfo->getTimezone()));
-//        $item_start_date = new dateObject($item, $db_tz);
-        $item_start_date = new \DateTime();
-        $item_start_date->setTimestamp($item[0]['value']);
-        $item_end_date   = $item_start_date;
-        $entity->date_id = ['calendar.' . $id . '.' . $field_name . '.0'];
+        // If this is the end date/time field, ignore it for now.
+        if (preg_match('{_end_value$}', $field_name)) {
+          continue;
+        }
+        $field_name = str_replace('_value', '', $field_name);
       }
 
-      // If we don't have a date value, go no further.
-      if (empty($item_start_date)) {
+      $entities = array_merge(array('entity' => $entity), $row->_relationship_entities);
+
+      foreach ($entities as $label => $entity) {
+        if ($entity->hasField($field_name)) {
+          $item_start_date = new \DateTime($entity->$field_name->value, $db_tz);
+          $item_start_date->setTimezone($user_tz);
+          if (empty($entity->$field_name->end_value)) {
+            $item_end_date = $item_start_date;
+          }
+          else {
+            $item_end_date = new \DateTime($entity->$field_name->end_value, $db_tz);
+            $item_end_date->setTimezone($user_tz);
+          }
+          $entity->date_id = ['calendar.' . $id . '.' . $field_name . '.0'];
+        }
+      }
+
+      // If we don't have date values, go no further.
+      if (empty($item_start_date) || empty($item_end_date)) {
         continue;
       }
 
-      // Set the item date to the proper display timezone;
-      // @todo handle timezones
-//      $item_start_date->setTimezone(new dateTimezone($to_zone));
-//      $item_end_date->setTimezone(new dateTimezone($to_zone));
-
       $event->setStartDate($item_start_date);
       $event->setEndDate($item_end_date);
-      $event->setTimezone(new \DateTimeZone(timezone_name_get($dateInfo->getTimezone())));
-      $event->setGranularity($granularity);
-
-      // @todo remove while properties get transfered to the new object
-//      $event_container = new stdClass();
-//      $event_container->db_tz = $db_tz;
-//      $event_container->to_zone = $to_zone;
-//      $event_container->increment = $increment;
-//      $event_container->field = $is_field ? $item : NULL;
-//      $event_container->row = $row;
-//      $event_container->entity = $entity;
-
-      // All calendar row plugins should provide a date_id that the theme can use.
-      // @todo implement
-//      $event_container->date_id = $entity->date_id[0];
-
-      // We are working with an array of partially rendered items
-      // as we process the calendar, so we can group and organize them.
-      // At the end of our processing we'll need to swap in the fully formatted
-      // display of the row. We save it here and switch it in
-      // template_preprocess_calendar_item().
-      // @FIXME
-// theme() has been renamed to _theme() and should NEVER be called directly.
-// Calling _theme() directly can alter the expected output and potentially
-// introduce security issues (see https://www.drupal.org/node/2195739). You
-// should use renderable arrays instead.
-//
-//
-// @see https://www.drupal.org/node/2195739
-// $event->rendered = theme($this->theme_functions(),
-//       array(
-//         'view' => $this->view,
-//         'options' => $this->options,
-//         'row' => $row,
-//         'field_alias' => isset($this->field_alias) ? $this->field_alias : '',
-//       ));
+      $event->setTimezone($dateInfo->getTimezone());
+      $event->setGranularity(end($info['granularity']));
 
       /** @var \Drupal\calendar\CalendarEvent[] $events */
       $events = $this->explode_values($event);
